@@ -1,0 +1,47 @@
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python package
+        run: |
+          pip install -U pip
+          pip install -e src/python
+          pip install pytest
+
+      - name: Build C
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential make
+          make -C src/c
+
+      - name: Run tests
+        run: |
+          pytest -q tests
+
+      - name: Generate examples and encode
+        run: |
+          python examples/generate_samples.py --minutes 2 --rate-hz 2.0 --mode mild -o examples/_ci.csv
+          plp-encode examples/_ci.csv -o /tmp/_plp.bin --keyframe-every 30
+
+      - name: Archive artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: plp-artifacts
+          path: |
+            src/c/../bin/**
+            /tmp/_plp.bin
+            examples/_ci.csv

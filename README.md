@@ -229,3 +229,33 @@ polar-link-pack/
 
 ## License
 MIT © 2025
+
+
+### New Examples and Figure
+- `examples/sample_stream_dense.csv` — higher-rate, turning flight
+- `examples/sample_stream_sparse.csv` — sparse fixes, burst motion
+- `examples/generate_samples.py` — script to make custom streams
+- Figure: `paper/figures/bytes_per_sample.png`
+
+![Bytes per sample](paper/figures/bytes_per_sample.png)
+
+
+## Build Everything (One Command)
+
+### Linux / macOS
+```bash
+make        # builds C, installs Python pkg, runs tests, generates figure
+```
+
+Or:
+```bash
+bash scripts/build_all.sh
+```
+
+### Windows (PowerShell)
+```powershell
+pwsh scripts/build_all.ps1
+```
+
+### CI
+A GitHub Actions workflow is included at `.github/workflows/ci.yml` to build C, install Python, run tests, and archive artifacts on every push/PR.
