@@ -228,7 +228,7 @@ polar-link-pack/
 ---
 
 ## License
-MIT © 2025
+open
 
 
 ### New Examples and Figure
