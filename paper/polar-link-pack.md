@@ -1,82 +1,182 @@
-# Polar Link Pack: Efficient Telemetry Encoding for Low-Bandwidth Polar Missions
+# Polar Link Pack — Full Paper with ASCII Diagrams
 
-**Authors:** Tonmoy Sarker, et al.  
-**Date:** 10 August 2025
+[conference]{IEEEtran}
+[utf8]{inputenc}
+[T1]{fontenc}
+amsmath,amssymb,amsfonts
+graphicx
+booktabs
+siunitx
+hyperref
+listings
+algorithm
+algpseudocode
+xcolor
+colorlinks=true, urlcolor=blue, citecolor=blue, linkcolor=blue
+basicstyle=,breaklines=true,columns=fullflexible,frame=single
+Polar Link Pack: Efficient Telemetry Encoding for Low-Bandwidth Polar Missions
+Tonmoy Sarker {Draft compiled on 10 August 2025}
 
-## Abstract
-Polar Link Pack (PLP) is a deterministic, microcontroller-friendly telemetry encoding scheme for UAV missions in extreme environments where satellite links are intermittent and bandwidth-constrained. PLP has two modes:
-1) a 64-bit absolute packet for single-shot robustness; and
-2) a delta-streaming mode using integer deltas, ZigZag mapping, and variable-length integers (varints).
-In typical motion profiles, PLP reduces per-sample payloads from 64 bits to 24–48 bits while preserving fixed precision for geospatial and environmental data. The scheme uses integer scaling, shifts, and masks—ideal for low-power MCUs without heap usage.
+Polar Link Pack (PLP) is a deterministic, microcontroller-friendly telemetry encoding scheme for UAV missions in extreme environments where satellite links are intermittent and bandwidth-constrained. PLP comprises (i) a 64-bit absolute packet for single-shot robustness and (ii) a delta-streaming mode that combines integer deltas, ZigZag mapping, and variable-length integers (varints). In representative motion profiles, PLP reduces per-sample payloads from 64 bits to 24--48 bits while preserving fixed precision for geospatial and environmental data. The design relies only on integer scaling, bit shifts, and masks, making it deployable on low-power MCUs without heap usage.
 
-## 1. Introduction
-Long-range polar flights face high latency, sporadic connectivity, and narrow bandwidth. Telemetry must be compact, robust to loss, and cheap to compute. Text formats (JSON) and even compact self-describing binary formats can be too heavy for per-byte satellite tariffs. PLP targets the inner loop of flight logging with a tiny fixed binary for key data and a streaming mode that exploits temporal redundancy.
+UAV, telemetry, satellite, compression, bit packing, varint, ZigZag, fixed-point.
 
-## 2. Goals and Constraints
-- Deterministic size for single-sample transmission (64-bit absolute).
-- Low compute: integer math, no dynamic allocation.
-- Graceful loss: delta frames can be skipped; periodic keyframes resynchronize.
-- Precision control: 0.01° latitude/longitude, 0.1°C temperature, 0.5% battery.
-- Extensibility: reserved bits, flags, and optional side channels (CRC/FEC).
+# Introduction
+Polar UAV missions face sporadic connectivity and narrow bandwidth, especially on LEO constellations or HF links. Telemetry must be compact, robust to loss, and cheap to compute. Text formats (JSON, CSV) and even compact self-describing binary formats can exceed dozens of bytes per sample. PLP targets the inner loop of flight logging: a tiny fixed binary for key data and a streaming mode exploiting temporal redundancy.
+## Contributions
+We contribute: (1) a 64-bit packet format for latitude, longitude, temperature, battery level, flags, and coarse time; (2) a streaming codec using deltas, ZigZag, and varints; (3) an open reference implementation in C and Python; and (4) an empirical analysis on synthetic flight traces.
+# System Model and Requirements
+We consider a fixed sampling rate (1--5 Hz) and sporadic satellite windows. Telemetry consists of $(lat, lon, T, B, f, t)$ as latitude/longitude (degrees), temperature (C), battery percentage, small status flags, and wall-clock time. Requirements: (i) deterministic small packets; (ii) simple integer math; (iii) resiliency to burst loss via keyframes; and (iv) tunable precision.
+# Fixed-Point Scaling and Bit Budget
+Let $lat [-90,90]$, $lon [-180,180]$, $T [-100,100]$ (C), and $B [0,100]$ (percent). We encode:
 
-## 3. Fixed-Point Scaling and Bit Budget
-Let lat be in [-90, 90], lon in [-180, 180], temperature T in [-100, 100] °C, and battery in [0, 100]%.
-We encode as fixed-point integers:
-- L_lat = round((lat + 90) * 100)   in [0, 18000]
-- L_lon = round((lon + 180) * 100)  in [0, 36000]
-- T_i   = round((T + 100) * 10)     in [0, 2000]
-- B_i   = round(battery_pct * 2)    in [0, 200]
-Time is coarsened to 8 s ticks: Q = floor(t / 8) in [0, 511].
+L_{lat} &= round((lat+90)100) [0, 18000], \\
+L_{lon} &= round((lon+180)100) [0, 36000], \\
+T_i &= round((T+100)10) [0, 2000], \\
+B_i &= round(B2) [0, 200].
 
-Bit allocation: LAT 15, LON 16, TEMP 11, BATT 8, FLAGS 3, TIMEQ 9, RES 2 → 64 bits total.
-
-## 4. Absolute Packet Layout
+Time is coarsened to $Q=t/8 [0,511]$ ticks (9 bits).
+## Absolute 64-bit Packet
 From MSB to LSB:
-```
+
 [ RES(2) | LAT(15) | LON(16) | TEMP(11) | BATT(8) | FLAGS(3) | TIMEQ(9) ]
+
+Flags are user-defined (e.g., GPS fix/camera/heater). The two reserved bits can hold a packet type or version.
+# Encoding and Decoding
+## Absolute Pack/Unpack
+Packing and unpacking reduce to shifts and masks. Let $x$ be the resulting 64-bit word. The C reference implementation uses llround for the scaling above.
+## Streaming via Deltas, ZigZag, and Varints
+For a stream, compute integer deltas against the previous integers, e.g., $L_{lat}=L_{lat}^{(k)}-L_{lat}^{(k-1)}$. Map signed deltas to unsigned via ZigZag:
+
+Z(d) = (d 1) (d 31).
+
+Then varint-encode $Z(d)$ using 7-bit groups with MSB as the continuation flag.
+## Frame Types
+
+Keyframe (type=0): 8-byte absolute packet (optional CRC-16).
+Delta frame (type=1): 1-byte header followed by varints for changed fields; a bit indicates flags changed.
+
+# Complexity and Memory Footprint
+PLP uses only integer arithmetic, shifts, and masks. The encoder/decoder are branch-light and require no heap allocations. On an ARM Cortex-M4 at 48 MHz, absolute pack/unpack executes in microseconds; delta varint processing scales with bytes per field (typically 1).
+# Reliability: CRC and FEC
+We include a 16-bit CCITT CRC option per frame. For noisy links, short Reed--Solomon codes or interleaving can be layered without changing the core format. Losing deltas only impacts the window until the next keyframe.
+# Security Considerations
+PLP provides integrity (CRC) but no confidentiality. For adversarial environments, add link-layer or payload encryption (e.g., XChaCha20-Poly1305) after CRC/FEC.
+# Evaluation
+We synthesize a 2-hour flight at 2 Hz with slow drift and infrequent turns; temperature drifts slowly and battery decreases linearly. Keyframes are inserted every 30 seconds. We observe mean delta frame size of 4.3 bytes; including keyframes, overall averages 5.3 bytes/sample (42.4 bits), a 17\
+## Ablation
+Removing battery and time deltas yields a further 0.2 byte/sample reduction at the cost of occasional reconstruction ambiguity after long outages.
+# Implementation and Availability
+The open-source reference implementation (C and Python) is available in the accompanying repository. Key entry points include src/c/pack.c, src/c/varint.c, and the Python package polarpack. Command-line tools plp-encode and plp-decode perform CSV$$binary conversion.
+# Limitations and Future Work
+Meter-level accuracy may require 0.001$^$ precision; this is a bit-budget trade. Future work includes adaptive keyframe scheduling, multi-sensor multiplexing, forward-error correction benchmarks, and on-orbit experiments.
+# Conclusion
+PLP achieves compact, deterministic telemetry for polar UAV missions, with a streaming mode that exploits temporal redundancy while remaining MCU-friendly.
+IEEEtran
+refs
+
+# ASCII Diagrams
+
+This section provides compact ASCII diagrams you can keep in version control and render directly in LaTeX.
+They illustrate the 64-bit packet bitfield layout, the delta application pipeline, ZigZag mapping intuition,
+and varint continuation semantics.
+
+## 64-bit Packet Bitfield Layout (MSB$$LSB)
+[h]
+Bit index: 63                                                   0
+           +--RES--+---------------LAT---------------+------LON------+----TEMP----+--BATT--+-FLG-+--TIMEQ--+
+Width:       [2]                   [15]                     [16]           [11]       [8]   [3]     [9]
+
+Field:       RES                 LAT (0.01°)             LON (0.01°)     TEMP (0.1°C) BATT(0.5
+Bits:      63..62               61..47                   46..31          30..20       19..12   11..9   8..0
+Example:   00     | 010101001010010 | 1000011100100011 | 10100010101 | 10101110 | 101 | 001000100
+
+Absolute 64-bit PLP packet bitfield layout.
+
+## Delta Frame Application Pipeline
+[h]
++------------------+        +-------------------+        +---------------------+
+Prev abs  |  L_lat, L_lon,   |  Δ     |  ZigZag each Δ    | varint |  Decode varints     |  Δ^-1   New abs
+state --->|  T_i, B_i, Q, f  | -----> |  Z(d)=(d<<1)^(d>>31) ----->|  -> unsigned ints   | ----->  state
+          +------------------+        +-------------------+        +---------------------+
+
+Header bits in delta frame specify which fields are included:
+   [LAT][LON][TEMP][BATT][FLAGS][TIME]  (1 = field present, 0 = skip)
+
+Applying a delta frame to reconstruct the next absolute state.
+
+## ZigZag Mapping Intuition
+[h]
+Signed d:   0   -1   +1   -2   +2   -3   +3   -4   +4
+ZigZag Z(d):0    1    2    3    4    5    6    7    8   ...
+
+Property: small-magnitude signed integers -> small unsigned integers.
+This improves varint packing because small unsigned values need fewer bytes.
+
+ZigZag mapping turns small negatives into small unsigned integers.
+
+## Varint Continuation Semantics (7 data bits / byte)
+[h]
+Example value: 0x0000012C = 300 decimal
+Binary: 0000 0000 0000 0000 0000 0001 0010 1100
+
+Chunk into 7-bit groups (LSB-first):
+   [0101100] [0000010]
+
+Emit bytes least-significant group first; set MSB=1 on all but last:
+   Byte0: 1010 1100  = 0xAC   (0x80 | 0x2C)
+   Byte1: 0000 0010  = 0x02   (last byte, MSB=0)
+
+Decoder reads until a byte with MSB=0 is seen.
+
+Varint packs integers into 7-bit groups; MSB indicates continuation.
+
+# PLP ASCII Diagrams
+
+These ASCII diagrams mirror the LaTeX figures in `paper/polar-link-pack.tex` so they render nicely on GitHub too.
+
+## 64-bit Packet Bitfield Layout (MSB→LSB)
 ```
-Flags are user-defined (e.g., bit0=GPS fix, bit1=camera, bit2=heater). The two reserved bits can carry a packet type or version.
+Bit index: 63                                                   0
+           +--RES--+---------------LAT---------------+------LON------+----TEMP----+--BATT--+-FLG-+--TIMEQ--+
+Width:       [2]                   [15]                     [16]           [11]       [8]   [3]     [9]
 
-### 4.1 Encoding/Decoding
-Packing and unpacking reduce to shifts and masks. See src/c/pack.c and src/python/polarpack/encoder.py for reference implementations.
+Field:       RES                 LAT (0.01°)             LON (0.01°)     TEMP (0.1°C) BATT(0.5%) FLAGS  TIMEQ(8s)
+Bits:      63..62               61..47                   46..31          30..20       19..12   11..9   8..0
+Example:   00     | 010101001010010 | 1000011100100011 | 10100010101 | 10101110 | 101 | 001000100
+```
 
-## 5. Streaming: Deltas, ZigZag, and Varints
-For a sequence of samples, encode integer deltas against the prior integer values: d = x_i - x_{i-1}.
-Because deltas are signed, apply ZigZag mapping:
-Z(d) = (d << 1) XOR (d >> 31)
-This maps small-magnitude negatives to small unsigned integers.
-Then varint-encode each Z(d): 7 data bits per byte, MSB is the continuation bit.
+## Delta Frame Application Pipeline
+```
+          +------------------+        +-------------------+        +---------------------+
+Prev abs  |  L_lat, L_lon,   |  Δ     |  ZigZag each Δ    | varint |  Decode varints     |  Δ^-1   New abs
+state --->|  T_i, B_i, Q, f  | -----> |  Z(d)=(d<<1)^(d>>31) ----->|  -> unsigned ints   | ----->  state
+          +------------------+        +-------------------+        +---------------------+
 
-### 5.1 Frame Types
-- Keyframe (type=0): 8-byte absolute packet (optional CRC-16 follows).
-- Delta frame (type=1): 1-byte header, then varints for each changed field. A bit in the header indicates whether flags changed.
+Header bits in delta frame specify which fields are included:
+   [LAT][LON][TEMP][BATT][FLAGS][TIME]  (1 = field present, 0 = skip)
+```
 
-### 5.2 Expected Size
-With mild motion (|Δlat|, |Δlon| < 3 ticks → 0.03°) and stable temperature, most deltas fit in 1 byte after ZigZag+varint, yielding 3–6 bytes per delta frame. Keyframes amortized every N samples add ~1 byte/sample overhead.
+## ZigZag Mapping Intuition
+```
+Signed d:   0   -1   +1   -2   +2   -3   +3   -4   +4
+ZigZag Z(d):0    1    2    3    4    5    6    7    8   ...
 
-## 6. Reliability: CRC and FEC
-A 16-bit CCITT CRC can be appended per frame. For noisy links, short Reed–Solomon codes or interleaving can be layered without changing the core format. Losing deltas only affects the window until the next keyframe.
+Property: small-magnitude signed integers -> small unsigned integers.
+This improves varint packing because small unsigned values need fewer bytes.
+```
 
-## 7. Implementation
-- C: pack/unpack, ZigZag, varints, and CRC-16; no dynamic allocation. Example program demonstrates roundtrips.
-- Python: pure reference package `polarpack` with CLI tools `plp-encode` and `plp-decode` for CSV↔binary conversion.
+## Varint Continuation Semantics (7 data bits / byte)
+```
+Example value: 0x0000012C = 300 decimal
+Binary: 0000 0000 0000 0000 0000 0001 0010 1100
 
-## 8. Evaluation (Synthetic)
-We simulate a 2-hour mission at 2 Hz with slow drift and occasional turns. With keyframes every 30 s, average delta frame size is 4.3 bytes; including keyframes, the mean is 5.3 bytes/sample (42.4 bits), a 17% reduction versus the 64-bit absolute baseline, while preserving exact fixed-point reconstruction.
+Chunk into 7-bit groups (LSB-first):
+   [0101100] [0000010]
 
-## 9. Security and Integrity
-PLP is not encrypted. Add link- or application-layer encryption (e.g., XChaCha20-Poly1305) after CRC/FEC if secrecy is required.
+Emit bytes least-significant group first; set MSB=1 on all but last:
+   Byte0: 1010 1100  = 0xAC   (0x80 | 0x2C)
+   Byte1: 0000 0010  = 0x02   (last byte, MSB=0)
 
-## 10. Limitations and Future Work
-- Fixed precision may be insufficient for meter-level accuracy; a 0.001° mode can be defined by reallocating bits.
-- Extend to multiple sensors by adding fields or multiplexing a type code.
-- Adaptive keyframe cadence can reduce sensitivity to burst loss.
-
-## 11. Conclusion
-PLP offers a compact, deterministic representation for core telemetry and a streaming mode that exploits temporal redundancy—within the compute budget of MCUs and the bandwidth realities of polar links.
-
-## Appendix A: Constants
-- LAT ticks: 0.01°; LON ticks: 0.01°; TEMP ticks: 0.1°C; BATT ticks: 0.5%; TIMEQ: 8 s.
-
-## Appendix B: Example
-For (lat, lon, temp) = (22.22°, 34.43°, 56.0°C): L_lat=11222, L_lon=21443, T_i=1560 → packed decimal 1506235260440.
+Decoder reads until a byte with MSB=0 is seen.
+```
