@@ -84,12 +84,12 @@ and varint continuation semantics.
 ## 64-bit Packet Bitfield Layout (MSB$$LSB)
 [h]
 Bit index: 63                                                   0
-           +--RES--+---------------LAT---------------+------LON------+----TEMP----+--BATT--+-FLG-+--TIMEQ--+
-Width:       [2]                   [15]                     [16]           [11]       [8]   [3]     [9]
+           +--RES--+---------------LAT---------------+------LON------+----TEMP----+-------BATT--+-FLG-+--TIMEQ--+
+Width:       [2]                   [15]                     [16]           [11]           [8]   [3]     [9]
 
-Field:       RES                 LAT (0.01°)             LON (0.01°)     TEMP (0.1°C) BATT(0.5
-Bits:      63..62               61..47                   46..31          30..20       19..12   11..9   8..0
-Example:   00     | 010101001010010 | 1000011100100011 | 10100010101 | 10101110 | 101 | 001000100
+Field:       RES                  LAT (0.01°)              LON (0.01°)     TEMP (0.1°C)   BATT(0.5
+Bits:        63..62               61..47                   46..31          30..20         19..12   11..9   8..0
+Example:      00               | 10101001010010       | 1000011100100011 | 10100010101 | 10101110 | 101 | 001000100
 
 Absolute 64-bit PLP packet bitfield layout.
 
